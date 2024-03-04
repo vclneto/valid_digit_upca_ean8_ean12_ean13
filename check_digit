@@ -1,0 +1,126 @@
+CREATE OR REPLACE FUNCTION valid_digit_upca_ean8_ean12_ean13(barcode char(13)) 
+RETURNS text
+AS $$
+DECLARE
+  one_char text;
+  i_barcode INTEGER;
+  odds int := 0;
+  evens int := 0;
+  digit_unique int;
+  float_sum real;
+  digit_verific int;
+  sum_odds_evens int;
+  lenght_barcode int;
+
+  
+BEGIN
+
+  -- remove espaços vazios, caso string Ex: ( 123 456 789 000) -> (123456789000)
+  barcode := regexp_replace(barcode, '\s+', '', 'g');
+  
+  -- define e preenche uma variável com o comprimento do código.
+  lenght_barcode := LENGTH(barcode);
+  
+  
+  CASE 
+   -- verifica se há caractere não numéricos (Ex: 000I100) -> return false
+    WHEN barcode ~ '[^0-9]'
+      THEN return 'Digite apenas números.';
+    -- verifica se a estring está vazia ou se o valor é 0 Ex: (00000000) -> return false
+    WHEN barcode = '' OR barcode::bigint = 0
+      THEN return 'O valor de busca não pode ser nulo ou conter somente zeros.';
+    -- verifica se o comprimento da string é menor que 8 ou maior que 13 -> return false
+    WHEN lenght_barcode < 8 OR lenght_barcode > 13
+      THEN return 'São aceitos apenas números com 8, 12 e 13 dígitos, seu código possui ' || lenght_barcode || '.';
+      -- verifica se o comprimento da string está entre 8 e 12:  Se 9,10 ou 11 -> return false  
+    WHEN lenght_barcode > 8 AND lenght_barcode < 12
+      THEN return 'São aceitos apenas números com 8, 12 e 13 dígitos, seu código possui ' || lenght_barcode || '.';
+    ELSE
+    
+    
+    -- adiciona 1 dígito 0 a esquerda quando o código tem 12 caracteres.
+  IF lenght_barcode = 12 THEN
+    one_char = '0' || barcode;
+  ELSE
+    one_char = barcode;
+  END IF;
+  
+  
+-- Passa por cada caraqctere do código e soma os valores das posições impares e pares respectivamente.
+<<sum_digits>>
+    FOR i_barcode IN 1..lenght_barcode-1 LOOP
+      digit_unique := substring(barcode from i_barcode for 1::SMALLINT);
+
+        IF i_barcode  % 2 = 1 THEN
+          odds := digit_unique + odds;
+        ELSE
+          evens := digit_unique + evens;
+        END IF;
+    END LOOP sum_digits;
+    
+    
+-- Em upca, ean12 e ean13 a soma dos dígitos na posição impares são multiplicado por 3. Em ean8, são 
+--os dígitos nas posições pares que são multiplicao por 3.
+    IF lenght_barcode > 8 THEN
+      evens := 3 * evens;
+    ELSE
+      odds := odds * 3;
+    END IF;
+    
+    
+    sum_odds_evens := odds+evens;
+    
+      
+-- Impede a divisão por 0 em casos como (Ex: 000000000001) ou eveita substração de 10 - 0  em (Ex: 00000001)
+
+    
+    -- Converte o valor da soma (já multiplicada por 3) para float
+
+-- Verifica a soma (já multiplicada por 3) se é menor ou igual a 10, se sim o dígito verificado é 
+-- encontrado subtraindo o valor da soma de 10.  Caso seja maior o digito verificador é encontrado
+--da seguinte forma: 1º - Divide a soma dos dígitos por 10.0 (Ex: 61 / 10.0); 2º - Usa a função CAST() para encontrar
+-- o número inteiro que vem logo a seguir do valor fracionado (Ex: CAST(6,1) = 7); 3º - Usa o resultado
+--da função CAST() para multiplicar por 10.0 (Ex: 7*10.0); 4º - Trasforma o valor novamente em inteiro; 
+--5º - Calcula o resto da divisão do valor interior pela soma inicial (já multiplicada por 3) (Ex: 70 % 61).
+    IF sum_odds_evens = 0 THEN
+      return false;
+    ELSIF sum_odds_evens <= 10  THEN
+      digit_verific := 10 - sum_odds_evens;
+    ELSIF sum_odds_evens % 10 = 0 THEN
+      digit_verific := 0;
+    ELSE
+      float_sum := sum_odds_evens::numeric(4,1);
+      digit_verific := ((CEIL(float_sum / 10.00)) * 10.0)::int % (sum_odds_evens);
+    END IF;
+
+     RAISE NOTICE 'Dígito: % ', digit_verific AS digit;
+    
+-- Compara o último dígito fornecido com o último de dígito calculado, se iguais, o código fornecido
+--está correto
+    IF digit_verific::CHAR = substring(barcode from lenght_barcode for 1) THEN
+      return true;
+    ELSE
+      return false;
+    END IF;
+  
+
+  
+  END case;
+
+  
+
+END;
+$$ LANGUAGE plpgsql;
+
+
+
+select valid_digit_upca_ean8_ean12_ean13('7896110100043');
+
+
+
+
+
+
+
+
+
